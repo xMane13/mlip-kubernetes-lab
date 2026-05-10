@@ -1,146 +1,197 @@
-# Lab: Orchestrating ML training and Inference with Kubernetes
-In this lab you will:
- - Leverage Kubernetes to enable continuous model training and inference
- - Distribute traffic across multiple replicas of the backend inference service
- - And experiment with [container lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/) in Kubernetes.
+# Final Term 01: Orchestrating ML Training and Inference with Kubernetes
 
+**Machine Learning in Production (MLOps) — Yachay Tech University**
 
-
-## Deliverables
-
-- [ ] Show the TA that you are continuously training a model using Kubernetes CronJobs
-- [ ] Show the TA that inference requests are being distributed across multiple backend replicas. Explain to the TA how Kubernetes routes requests across multiple replicas in a service.
-- [ ] Demonstrate an effective use of the `preStop` container lifecycle hook to the TA. Explain the graceful shutdown sequence to the TA and describe one practical use case for lifecycle hooks.
-
-
-
-## Getting Started
-1. **Sign up for Docker**: If you don't already, ensure you have an account at [docker.com](https://www.docker.com/), so you can push images to the docker registry.
-2. **Start Docker**: Ensure Docker is running on your machine.
-3. **Fork Repo**: Fork the repo [here](https://github.com/mlip-cmu/mlip-kubernetes-lab) 
-4. **Install MiniKube**: Follow instructions [here](https://minikube.sigs.k8s.io/docs/start/).
-5. **Start MiniKube**: Start MiniKube on your local setup. Run `minikube start`.
-6. **Verify MiniKube**: Confirm that MiniKube is running by listing all pods:
-
-```
-kubectl get po -A
-```
-
-## Task 1: Implement continuous training 
-1. In `model_trainer.py` implement the code to train the model given training data `X` and labels `Y`
-2. Push your model training image. For details on how to do that, see [Build and Push the Docker Image](./README.md#build-and-push-the-docker-image)
-3. In `trainer_deployment.yaml` configure the cron so that the model training runs at a periodic interval (for demonstration purposes keep it fairly frequent; every 1-2 minutes)  
-```
-kubectl apply -f trainer-deployment.yaml
-```
-At this point, you should be able to see the continuously running training `model-trainer-job` CronJob using the Minikube dashboard. For instructions on doing that see [Troubleshooting](#troubleshooting).
-
-Alternatively, you should be able to verify this using the kubectl cli:
-```
-kubectl get jobs # this should output a list of your most recent jobs
-kubectl logs -f job/<trainer-job-id>
-
-```
-
-## Task 2: Implement the Backend Inference Service 
-1. In `backend.py` implement the code changes to predict based on 
-2. Push your backend image to the Docker registry. For details on how to do that, see [Build and Push the Docker Image](./README.md#build-and-push-the-docker-image)
-
-3. At this point, you should be able to verify that you can reach and can see the inference happening on distributed backend. For this task/step comment out the `lifecycle` hook in `backend-deployment.yaml` (or just skip this step and do the full implementation of `backend-deployment.yaml` at the next step).  
-Then apply the manifest for the backend service:
-```
-kubectl apply -f backend-deployment.yaml
-```
-You should see something like this printed out to the terminal:
-```
-deployment.apps/flask-backend-deployment created
-service/flask-backend-service configured
-```
-Verify using [this postman collection](./mlip-kubernetes.postman_collection.json) AND/OR the following `cURL` commands. For obtaining the correct port, see [Accessing the Backend Service](#accessing-the-backend-service). You should see the `host` parameter in the response body vary across requests: 
-```
-curl --location --request GET '127.0.0.1:<some-port-here>/model-info'
-```
-
-```
-curl --location --request POST '127.0.0.1:<some-port-here>/predict' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "avg_session_duration": 30,
-    "visits_per_week": 14,
-    "response_rate": 4,
-    "feature_usage_depth": 6,
-    "user_id": 34
-}'
-```
-4. Looking at the responses from either the GET or the POST requests, how can you verify that Kubernetes is load-balancing the requests across the replicas of the backend inference service (hint: the `host` field might be helpful here). Discuss with the TA how Kubernetes routes traffic to the replicas of a service. 
-
-   Consider reading the following source to better understand how Kubernetes routes traffic in a service:
-   - https://kubernetes.io/docs/concepts/services-networking/
-
-## Task 3: Implement the lifecycle hook and re-deploy service in Kubernetes
-1. Configure the lifecycle `preStop` hook in [backend-deployment.yaml](backend-deployment.yaml) to signal to the [backend.py](./backend.py) process that the 
-
-2. Re-deploy the backend: 
-```
-kubectl apply -f backend-deployment.yaml
-```
-
-3. Now that this task is complete you should be able to demonstrate the behavior of te lifecycle hook:    
-
-```
-# for verifying shutdown hooks
-kubectl rollout restart deployment/flask-backend-deployment
-# then in a separate process
-kubectl logs -l app=flask-backend -f
-```
-4. Based on the logs you observed during the rollout restart, when does the preStop container lifecycle hook run relative to Kubernetes sending SIGTERM to the container? Explain the graceful shutdown sequence to the TA and describe one practical use case for lifecycle hooks.
-
-   Consider reading the following two sources to better understand how Kubernetes handles shutdowns:
-   - https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/
-   - https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination
-
-### 
-
+> End-to-end ML system lifecycle on Kubernetes: continuous training, containerized inference, load balancing, and graceful shutdown via lifecycle hooks.
 
 ---
 
-## Build and Push the Docker Image:
-Before you do the following steps, ensure you have logged into docker. You will need to do the following for EACH type of image (trainer and backend)
+## Repository Structure
+
 ```
-docker build -t <your-dockerhub-username>/<backend-image-name>:1.0.0 -f Dockerfile.backend .
-docker push <your-dockerhub-username>/<backend-image-name>:1.0.0
+mlip-kubernetes-lab/
+├── model_trainer.py          # Training script (RandomForestRegressor)
+├── backend.py                # Flask inference API (/model-info, /predict)
+├── Dockerfile.trainer        # Container image for the trainer
+├── Dockerfile.backend        # Container image for the backend
+├── trainer-deployment.yaml   # Kubernetes CronJob (runs every 2 min)
+├── backend-deployment.yaml   # Kubernetes Deployment + NodePort Service
+├── persistent-volume.yaml    # PersistentVolumeClaim (shared model storage)
+└── demo.sh                   # Live demo script
 ```
 
-## Accessing the Backend Service
-Access the Backend Service via the NodePort
+---
 
-1. **Access via NodePort**:
+## System Architecture
 
-- Get the MiniKube IP:
-  ```
-  minikube ip
-  ```
-- Access the backend service using `curl` (replace `<minikube-ip>` with the output from `minikube ip`):
-  ```
-  curl "http://<minikube-ip>:30080/?user_id=Alice"
-  ```
+```
+CronJob (every 2 min)
+        │ triggers
+        ▼
+  Trainer Pod (model_trainer.py)
+        │ writes model.joblib
+        ▼
+  PersistentVolume (/shared-volume/)
+        │ reads (30s reload)       │ reads (30s reload)
+        ▼                          ▼
+  Backend Pod 1 (Flask)    Backend Pod 2 (Flask)
+        │                          │
+        └──────────┬───────────────┘
+                   ▼
+        NodePort Service (port 30081)
+                   │ routes requests
+                   ▼
+              Client (curl)
+```
 
-2. **Use `minikube service` (If NodePort Does Not Work)**:
+---
 
-- Create a tunnel to the backend service:
-  ```
-  minikube service flask-backend-service
-  ```
-- This command will provide a URL, typically in the format `http://127.0.0.1:<some-port>`, which you can use to test the backend service.
+## Prerequisites
 
+- [Minikube](https://minikube.sigs.k8s.io/docs/start/)
+- [Docker](https://www.docker.com/) + Docker Hub account
+- `kubectl` (bundled with Minikube)
 
-## Troubleshooting
-- **Launch MiniKube Dashboard**:
-Open the MiniKube dashboard to monitor the status of Pods, deployments, and services:
-  ```
-  minikube dashboard
-  ```
-- **Minikube IP Issues**: Use `minikube ip` to verify the correct IP.
-- **Service Not Accessible**: If NodePort does not work, use `minikube service` to create a tunnel.
-- **Backend Logs**: Use `kubectl logs -l app=flask-backend -f` to monitor requests going to the backend.
-- **Image Pull Issues**: Ensure your Docker images are pushed to Docker Hub with the correct tags. [More Details](https://docs.docker.com/get-started/introduction/build-and-push-first-image/)
+---
+
+## Setup & Deployment
+
+### 1. Start Minikube
+
+```bash
+minikube start
+kubectl get nodes
+```
+
+### 2. Create Shared Volume
+
+```bash
+kubectl apply -f persistent-volume.yaml
+kubectl get pvc   # wait for STATUS: Bound
+```
+
+### 3. Build and Push Docker Images
+
+```bash
+export DOCKER_USER=<your-dockerhub-username>
+
+docker build -t $DOCKER_USER/ml-trainer:1.0.0 -f Dockerfile.trainer .
+docker push $DOCKER_USER/ml-trainer:1.0.0
+
+docker build -t $DOCKER_USER/ml-backend:1.0.0 -f Dockerfile.backend .
+docker push $DOCKER_USER/ml-backend:1.0.0
+```
+
+### 4. Update Image Names in YAMLs
+
+Replace `<TU-USUARIO>` with your Docker Hub username:
+
+```bash
+sed -i 's/<TU-USUARIO>/<your-dockerhub-username>/g' trainer-deployment.yaml
+sed -i 's/<TU-USUARIO>/<your-dockerhub-username>/g' backend-deployment.yaml
+```
+
+### 5. Deploy Trainer CronJob
+
+```bash
+kubectl apply -f trainer-deployment.yaml
+kubectl get cronjobs          # model-trainer-job should appear
+kubectl get jobs              # wait ~2 min for first job
+kubectl logs <trainer-pod>    # confirm: "Model trained and saved successfully"
+```
+
+### 6. Deploy Backend Service
+
+```bash
+kubectl apply -f backend-deployment.yaml
+kubectl get pods              # 2 flask-backend pods Running
+kubectl get svc               # flask-backend-service on port 30081
+```
+
+---
+
+## Usage
+
+Get the Minikube IP:
+
+```bash
+minikube ip   # e.g. 192.168.49.2
+```
+
+**Query model info:**
+```bash
+curl http://192.168.49.2:30081/model-info
+```
+
+**Make a prediction:**
+```bash
+curl -X POST http://192.168.49.2:30081/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "avg_session_duration": 30,
+    "visits_per_week": 14,
+    "response_rate": 4,
+    "feature_usage_depth": 6
+  }'
+```
+
+**Verify load balancing** (observe `host` field alternating between pods):
+```bash
+for i in {1..6}; do
+  curl -s http://192.168.49.2:30081/model-info | python3 -c \
+    "import sys,json; print(json.load(sys.stdin)['host'])"
+done
+```
+
+---
+
+## Live Demo
+
+```bash
+chmod +x demo.sh
+./demo.sh
+```
+
+The script runs all steps automatically: cluster check → CronJob → trainer logs → backend pods → service → model-info → prediction → load balancing.
+
+---
+
+## Graceful Shutdown (preStop Hook)
+
+The `preStop` lifecycle hook in `backend-deployment.yaml` sends `SIGUSR1` to the Flask process before Kubernetes delivers `SIGTERM`, allowing in-flight requests to complete.
+
+To demonstrate:
+
+```bash
+# Terminal 1 — watch logs
+kubectl logs -l app=flask-backend -f
+
+# Terminal 2 — trigger rollout
+kubectl rollout restart deployment/flask-backend-deployment
+```
+
+Expected log sequence:
+```
+preStop signal received (SIGUSR1). Host preparing for shutdown: flask-backend-...
+SIGTERM received. Host being terminated: flask-backend-...
+```
+
+---
+
+## Key Design Decisions
+
+| Concern | Solution |
+|---|---|
+| Shared model storage | PersistentVolumeClaim mounted by both trainer and backend |
+| Continuous retraining | Kubernetes CronJob (every 2 min) |
+| Zero-downtime model updates | Background thread reloads model every 30s |
+| Load balancing | NodePort Service with 2 backend replicas |
+| Graceful shutdown | preStop hook sends SIGUSR1 before SIGTERM |
+
+---
+
+## Reference
+
+- [mlip-cmu/mlip-kubernetes-lab](https://github.com/mlip-cmu/mlip-kubernetes-lab)
+- [Kubernetes Services Networking](https://kubernetes.io/docs/concepts/services-networking/)
+- [Container Lifecycle Hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/)
