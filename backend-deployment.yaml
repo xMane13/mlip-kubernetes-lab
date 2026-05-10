@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name:  flask-backend-deployment
+  name: flask-backend-deployment
 spec:
   replicas: 2
   selector:
@@ -13,30 +13,30 @@ spec:
         app: flask-backend
     spec:
       containers:
-      - name: flask-backend
-        # TODO: Replace <DockerHub-Username> with your Docker Hub username, and use the appropriate image name and tag
-        image: <DockerHub-Username>/<backend-image-name>:<backend-image-tag>
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 5001
-        lifecycle:
-          preStop:
-            ## TODO: Implement a preStop hook that signals the running application to
-            ## log that shutdown preparation has started, then waits briefly before
-            ## Kubernetes sends SIGTERM to terminate the container.
-        volumeMounts:
-        - name: model-volume
-          mountPath: /shared-volume
-          readOnly: true  # Backend only needs read access
+        - name: flask-backend
+          image: xmane13/ml-backend:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5001
+          lifecycle:
+            preStop:
+              exec:
+                # Envía SIGUSR1 al proceso principal para que loguee el shutdown,
+                # luego espera 5 segundos antes de que Kubernetes mande SIGTERM
+                command: ["/bin/sh", "-c", "kill -USR1 1 && sleep 5"]
+          volumeMounts:
+            - name: model-volume
+              mountPath: /shared-volume
+              readOnly: true
       volumes:
-      - name: model-volume
-        persistentVolumeClaim:
-          claimName: model-pvc
+        - name: model-volume
+          persistentVolumeClaim:
+            claimName: model-pvc
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name:  flask-backend-service # TODO: Specify a unique service name if deploying multiple services
+  name: flask-backend-service
 spec:
   type: NodePort
   selector:
@@ -44,4 +44,4 @@ spec:
   ports:
     - port: 5001
       targetPort: 5001
-      nodePort: 30080 
+      nodePort: 30081

@@ -1,43 +1,24 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: model-pvc
-spec:
-  accessModes:
-    - ReadWriteOnce            # or ReadWriteMany if supported
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: standard 
-
----
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: model-trainer-job
 spec:
-  schedule: # TODO: implement a cron spec that runs every 1-2 minutes
-  concurrencyPolicy: Forbid  # Don't start new job if previous still running
-  successfulJobsHistoryLimit: 5         # keep only 5 (keep disk util low)
-  failedJobsHistoryLimit: 5             # keep no more than 5 (keep disk util low)    
+  # Ejecuta cada 2 minutos (perfecto para demo)
+  schedule: "*/2 * * * *"
   jobTemplate:
     spec:
-      ttlSecondsAfterFinished: 600       # delete Job 10 minutes after it finishes
       template:
-        metadata:
-          labels:
-            app: model-trainer
         spec:
+          restartPolicy: OnFailure
           containers:
-          - name: model-trainer
-            # TODO: Replace <DockerHub-Username> with your Docker Hub username, and use the appropriate image name and tag
-            image: <DockerHub-Username>/<model-training-image-name>:<model-training-image-tag>
-            volumeMounts:
-            - name: model-volume
-              mountPath: /shared-volume
+            - name: model-trainer
+              # TODO: Reemplaza xmane13 con tu username de Docker Hub
+              image: xmane13/ml-trainer:1.0.0
+              imagePullPolicy: Always
+              volumeMounts:
+                - name: model-volume
+                  mountPath: /shared-volume
           volumes:
-          - name: model-volume
-            persistentVolumeClaim:
-              claimName: model-pvc
-          terminationGracePeriodSeconds: 30
-          restartPolicy: OnFailure              
+            - name: model-volume
+              persistentVolumeClaim:
+                claimName: model-pvc

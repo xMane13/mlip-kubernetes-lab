@@ -17,11 +17,10 @@ current_model = None
 feature_names = None
 last_training_time = None
 
-
 def load_model():
     global current_model, feature_names, last_training_time
     try:
-        model_path = '/shared-volume/model.joblib' 
+        model_path = '/shared-volume/model.joblib'
         if os.path.exists(model_path):
             model_info = joblib.load(model_path)
             current_model = model_info['model']
@@ -32,13 +31,11 @@ def load_model():
             print("No model file found")
     except Exception as e:
         print(f"Error loading model: {e}")
-     
 
 @app.route('/model-info')
 def get_model_info():
     if current_model is None:
         return jsonify({"status": "No model loaded"}), 503
-    
     return jsonify({
         "status": "active",
         "last_training_time": last_training_time,
@@ -47,27 +44,27 @@ def get_model_info():
         "host": socket.gethostname()
     })
 
-
 @app.route('/predict', methods=['POST'])
 def predict_engagement():
     if current_model is None:
         return jsonify({"error": "No model loaded"}), 503
-    
+
     try:
         # Get user features from request
         user_data = request.get_json()
-        
+
         # Validate all required features are present
         if not all(feature in user_data for feature in feature_names):
             return jsonify({
                 "error": "Missing features",
                 "required_features": feature_names
             }), 400
-        
+
         # Create feature vector
         features = pd.DataFrame([user_data])[feature_names]
-        
-        # TODO: implement prediction of engagement_score using the current_model
+
+        # Predict engagement_score using the current_model
+        engagement_score = float(current_model.predict(features)[0])
 
         return jsonify({
             "engagement_score": engagement_score,
@@ -75,7 +72,7 @@ def predict_engagement():
             "model_training_time": last_training_time,
             "host": socket.gethostname()
         })
-    
+
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -99,7 +96,6 @@ def _handle_sigterm(signum, frame):
 signal.signal(signal.SIGUSR1, _handle_sigusr1)
 signal.signal(signal.SIGTERM, _handle_sigterm)
 
-
 def _periodic_model_reloader(interval_seconds=30):
     while True:
         try:
@@ -113,4 +109,4 @@ _reloader_thread.start()
 
 if __name__ == '__main__':
     load_model()  # Load model at startup
-    app.run(host='0.0.0.0', port=5001)    
+    app.run(host='0.0.0.0', port=5001)
